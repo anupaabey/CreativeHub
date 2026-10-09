@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nestjs",
-  "installCommand": "npm ci --include=dev",
+  "installCommand": "npm ci --include=dev --prefix ../..",
   "buildCommand": "node ../../scripts/vercel-api-build.mjs"
 }
