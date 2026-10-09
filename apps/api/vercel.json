@@ -2,5 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nestjs",
   "installCommand": "npm ci --include=dev",
-  "buildCommand": "npm run db:generate --prefix ../.. && npm run build"
+  "buildCommand": "node ../../scripts/vercel-api-build.mjs"
 }
