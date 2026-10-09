@@ -1,0 +1,632 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  CREATOR
+  AGENCY_ADMIN
+  AGENCY_MEMBER
+  ADMIN
+}
+
+enum Visibility {
+  DRAFT
+  PUBLIC
+  ARCHIVED
+}
+
+enum BookingStatus {
+  REQUESTED
+  QUOTED
+  AWAITING_PAYMENT
+  CONFIRMED
+  IN_PROGRESS
+  DELIVERED
+  REVISION_REQUESTED
+  COMPLETED
+  CANCELLED
+  REJECTED
+  EXPIRED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  DISPUTED
+}
+
+enum SettlementMode {
+  PARTNER_MARKETPLACE
+  PROVIDER_DIRECT
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                String         @id @default(cuid())
+  email             String         @unique
+  passwordHash      String?
+  emailVerifiedAt   DateTime?
+  name              String
+  phone             String?
+  avatarUrl         String?
+  roles             UserRole[]
+  sessions          Session[]
+  creator           Creator?
+  agencyMemberships AgencyMember[]
+  customerBookings  Booking[]      @relation("CustomerBookings")
+  messages          Message[]
+  notifications     Notification[]
+  subscriptions     Subscription[]
+  reviews           Review[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  role   Role
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Creator {
+  id              String             @id @default(cuid())
+  userId          String             @unique
+  username        String             @unique
+  headline        String             @default("")
+  bio             String             @default("")
+  districtId      String?
+  city            String?
+  yearsExperience Int?
+  coverUrl        String?
+  published       Boolean            @default(false)
+  verifiedAt      DateTime?
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  district        District?          @relation(fields: [districtId], references: [id])
+  services        Service[]
+  portfolio       PortfolioProject[]
+  bookings        Booking[]          @relation("CreatorBookings")
+  reviews         Review[]
+  analytics       AnalyticsEvent[]
+  availability    AvailabilitySlot[]
+  favorites       Favorite[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([published, districtId])
+}
+
+model Country {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  name         String
+  districts    District[]
+  currencyCode String     @default("LKR")
+  timezone     String     @default("Asia/Colombo")
+}
+
+model District {
+  id        String    @id @default(cuid())
+  countryId String
+  name      String
+  country   Country   @relation(fields: [countryId], references: [id])
+  creators  Creator[]
+
+  @@unique([countryId, name])
+}
+
+model Agency {
+  id         String         @id @default(cuid())
+  slug       String         @unique
+  name       String
+  bio        String         @default("")
+  logoUrl    String?
+  verifiedAt DateTime?
+  members    AgencyMember[]
+  services   Service[]
+  bookings   Booking[]
+  createdAt  DateTime       @default(now())
+}
+
+model AgencyMember {
+  id       String @id @default(cuid())
+  agencyId String
+  userId   String
+  role     Role
+  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, userId])
+}
+
+model Category {
+  id       String     @id @default(cuid())
+  slug     String     @unique
+  name     String
+  parentId String?
+  active   Boolean    @default(true)
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  services Service[]
+
+  @@index([parentId, active])
+}
+
+model Service {
+  id          String           @id @default(cuid())
+  creatorId   String?
+  agencyId    String?
+  categoryId  String
+  title       String
+  description String           @default("")
+  isRemote    Boolean          @default(false)
+  published   Boolean          @default(false)
+  creator     Creator?         @relation(fields: [creatorId], references: [id])
+  agency      Agency?          @relation(fields: [agencyId], references: [id])
+  category    Category         @relation(fields: [categoryId], references: [id])
+  packages    ServicePackage[]
+  createdAt   DateTime         @default(now())
+
+  @@index([categoryId, published])
+}
+
+model ServicePackage {
+  id           String    @id @default(cuid())
+  serviceId    String
+  title        String
+  description  String    @default("")
+  priceMinor   BigInt?
+  currency     String    @default("LKR")
+  quoteOnly    Boolean   @default(false)
+  durationDays Int?
+  revisions    Int       @default(0)
+  deliverables Json?
+  service      Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
+}
+
+model PortfolioProject {
+  id            String           @id @default(cuid())
+  creatorId     String
+  title         String
+  slug          String
+  description   String           @default("")
+  visibility    Visibility       @default(DRAFT)
+  publishedAt   DateTime?
+  clientConsent Boolean          @default(false)
+  coverUrl      String?
+  creator       Creator          @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  media         PortfolioMedia[]
+  createdAt     DateTime         @default(now())
+
+  @@unique([creatorId, slug])
+  @@index([creatorId, visibility])
+}
+
+model PortfolioMedia {
+  id         String           @id @default(cuid())
+  projectId  String
+  kind       MediaKind
+  storageKey String
+  altText    String?
+  sortOrder  Int              @default(0)
+  project    PortfolioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sortOrder])
+}
+
+model AvailabilitySlot {
+  id        String   @id @default(cuid())
+  creatorId String
+  startsAt  DateTime
+  endsAt    DateTime
+  isBlocked Boolean  @default(false)
+  creator   Creator  @relation(fields: [creatorId], references: [id])
+
+  @@index([creatorId, startsAt, endsAt])
+}
+
+model Favorite {
+  id        String  @id @default(cuid())
+  userId    String
+  creatorId String
+  creator   Creator @relation(fields: [creatorId], references: [id])
+
+  @@unique([userId, creatorId])
+}
+
+model CustomerRequest {
+  id           String      @id @default(cuid())
+  customerId   String
+  title        String
+  details      String
+  desiredStart DateTime?
+  desiredEnd   DateTime?
+  createdAt    DateTime    @default(now())
+  quotations   Quotation[]
+  bookings     Booking[]
+}
+
+model Quotation {
+  id          String          @id @default(cuid())
+  requestId   String
+  providerId  String
+  amountMinor BigInt
+  currency    String          @default("LKR")
+  description String
+  expiresAt   DateTime
+  status      String          @default("SENT")
+  request     CustomerRequest @relation(fields: [requestId], references: [id])
+  bookings    Booking[]
+  createdAt   DateTime        @default(now())
+}
+
+model Booking {
+  id                  String               @id @default(cuid())
+  customerId          String
+  creatorId           String?
+  agencyId            String?
+  packageId           String?
+  requestId           String?
+  quotationId         String?
+  status              BookingStatus        @default(REQUESTED)
+  startsAt            DateTime?
+  endsAt              DateTime?
+  currency            String               @default("LKR")
+  agreedAmountMinor   BigInt?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  customer            User                 @relation("CustomerBookings", fields: [customerId], references: [id])
+  creator             Creator?             @relation("CreatorBookings", fields: [creatorId], references: [id])
+  agency              Agency?              @relation(fields: [agencyId], references: [id])
+  package             ServicePackage?      @relation(fields: [packageId], references: [id])
+  request             CustomerRequest?     @relation(fields: [requestId], references: [id])
+  quotation           Quotation?           @relation(fields: [quotationId], references: [id])
+  project             Project?
+  paymentTransactions PaymentTransaction[]
+  review              Review?
+  conversation        Conversation?
+  disputes            Dispute[]
+  history             BookingHistory[]
+
+  @@index([customerId, status])
+  @@index([creatorId, startsAt, endsAt])
+}
+
+model BookingHistory {
+  id        String        @id @default(cuid())
+  bookingId String
+  previous  BookingStatus
+  next      BookingStatus
+  actorId   String
+  createdAt DateTime      @default(now())
+  booking   Booking       @relation(fields: [bookingId], references: [id])
+
+  @@index([bookingId, createdAt])
+}
+
+model Project {
+  id           String        @id @default(cuid())
+  bookingId    String        @unique
+  status       String        @default("ACTIVE")
+  milestones   Milestone[]
+  deliverables Deliverable[]
+  booking      Booking       @relation(fields: [bookingId], references: [id])
+}
+
+model Milestone {
+  id          String    @id @default(cuid())
+  projectId   String
+  name        String
+  dueAt       DateTime?
+  completedAt DateTime?
+  project     Project   @relation(fields: [projectId], references: [id])
+}
+
+model Deliverable {
+  id           String   @id @default(cuid())
+  projectId    String
+  storageKey   String
+  filename     String
+  uploadedById String
+  createdAt    DateTime @default(now())
+  project      Project  @relation(fields: [projectId], references: [id])
+}
+
+model Conversation {
+  id           String                    @id @default(cuid())
+  bookingId    String?                   @unique
+  participants ConversationParticipant[]
+  messages     Message[]
+  booking      Booking?                  @relation(fields: [bookingId], references: [id])
+  createdAt    DateTime                  @default(now())
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  lastReadAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  text           String
+  attachmentKey  String?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  sender         User         @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model PaymentTransaction {
+  id                String         @id @default(cuid())
+  bookingId         String
+  provider          String
+  providerReference String?
+  idempotencyKey    String         @unique
+  mode              SettlementMode
+  status            PaymentStatus  @default(CREATED)
+  amountMinor       BigInt
+  currency          String         @default("LKR")
+  booking           Booking        @relation(fields: [bookingId], references: [id])
+  refunds           Refund[]
+  createdAt         DateTime       @default(now())
+
+  @@index([provider, providerReference])
+}
+
+model Refund {
+  id          String             @id @default(cuid())
+  paymentId   String
+  amountMinor BigInt
+  status      String             @default("REQUESTED")
+  reason      String?
+  payment     PaymentTransaction @relation(fields: [paymentId], references: [id])
+  createdAt   DateTime           @default(now())
+}
+
+model LedgerAccount {
+  id       String        @id @default(cuid())
+  code     String        @unique
+  name     String
+  currency String        @default("LKR")
+  entries  LedgerEntry[]
+}
+
+model LedgerTransaction {
+  id          String        @id @default(cuid())
+  externalKey String        @unique
+  description String
+  createdAt   DateTime      @default(now())
+  entries     LedgerEntry[]
+}
+
+model LedgerEntry {
+  id            String            @id @default(cuid())
+  transactionId String
+  accountId     String
+  debitMinor    BigInt            @default(0)
+  creditMinor   BigInt            @default(0)
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
+  account       LedgerAccount     @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, transactionId])
+}
+
+model PayoutRecord {
+  id               String   @id @default(cuid())
+  providerId       String
+  amountMinor      BigInt
+  currency         String   @default("LKR")
+  partnerReference String?
+  status           String   @default("PENDING")
+  createdAt        DateTime @default(now())
+}
+
+model SubscriptionPlan {
+  id                   String         @id @default(cuid())
+  code                 String         @unique
+  name                 String
+  priceMinor           BigInt
+  monthlyCommissionBps Int
+  features             Json?
+  subscriptions        Subscription[]
+  active               Boolean        @default(true)
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  userId    String
+  planId    String
+  status    SubscriptionStatus @default(ACTIVE)
+  startedAt DateTime           @default(now())
+  expiresAt DateTime?
+  user      User               @relation(fields: [userId], references: [id])
+  plan      SubscriptionPlan   @relation(fields: [planId], references: [id])
+}
+
+model Review {
+  id            String   @id @default(cuid())
+  bookingId     String   @unique
+  authorId      String
+  creatorId     String
+  rating        Int
+  communication Int?
+  quality       Int?
+  timeliness    Int?
+  text          String   @default("")
+  response      String?
+  createdAt     DateTime @default(now())
+  booking       Booking  @relation(fields: [bookingId], references: [id])
+  author        User     @relation(fields: [authorId], references: [id])
+  creator       Creator  @relation(fields: [creatorId], references: [id])
+
+  @@index([creatorId, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt, createdAt])
+}
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  creatorId   String
+  eventType   String
+  visitorHash String?
+  occurredAt  DateTime @default(now())
+  creator     Creator  @relation(fields: [creatorId], references: [id])
+
+  @@unique([creatorId, eventType, visitorHash])
+  @@index([creatorId, eventType, occurredAt])
+}
+
+model VerificationRequest {
+  id          String             @id @default(cuid())
+  subjectId   String
+  subjectType String
+  status      VerificationStatus @default(PENDING)
+  createdAt   DateTime           @default(now())
+}
+
+model Dispute {
+  id         String   @id @default(cuid())
+  bookingId  String
+  openedById String
+  reason     String
+  status     String   @default("OPEN")
+  createdAt  DateTime @default(now())
+  booking    Booking  @relation(fields: [bookingId], references: [id])
+}
+
+model SupportTicket {
+  id         String   @id @default(cuid())
+  openedById String
+  title      String
+  message    String
+  status     String   @default("OPEN")
+  createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+}
+
+model WebhookReceipt {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  payloadHash String
+  receivedAt  DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  purpose   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+}
+
+model EmailJob {
+  id        String    @id @default(cuid())
+  recipient String
+  subject   String
+  body      String
+  status    String    @default("PENDING")
+  attempts  Int       @default(0)
+  lastError String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+}
+
+model StoredObject {
+  id          String    @id @default(cuid())
+  ownerId     String
+  bookingId   String?
+  key         String    @unique
+  filename    String
+  contentType String
+  sizeBytes   Int
+  public      Boolean   @default(false)
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([ownerId, bookingId])
+}

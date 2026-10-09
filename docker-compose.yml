@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: creativehub
+      POSTGRES_USER: creativehub
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-creativehub_dev}
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creativehub"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: creativehub
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-replace_me}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+  api:
+    profiles: ["app"]
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://creativehub:${DB_PASSWORD:-creativehub_dev}@db:5432/creativehub?schema=public
+      PORT: 4000
+      SMTP_HOST: mailpit
+      S3_ENDPOINT: http://minio:9000
+    ports: ["4000:4000"]
+    depends_on:
+      db: {condition: service_healthy}
+  web:
+    profiles: ["app"]
+    build: .
+    command: ["npm", "run", "start", "-w", "@creativehub/web"]
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    ports: ["3000:3000"]
+    depends_on: [api]
+  email-worker:
+    profiles: ["email"]
+    build: .
+    command: ["node", "scripts/email-worker.mjs"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://creativehub:${DB_PASSWORD:-creativehub_dev}@db:5432/creativehub?schema=public
+      SMTP_HOST: mailpit
+    depends_on:
+      db: {condition: service_healthy}
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

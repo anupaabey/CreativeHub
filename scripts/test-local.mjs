@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {PGlite} from '@electric-sql/pglite';
+import {createServer,LogLevel} from 'pglite-server';
+import {readFileSync} from 'node:fs';
+import {spawn} from 'node:child_process';
+const database=new PGlite();await database.waitReady;await database.exec(readFileSync('prisma/migrations/202610090001_initial/migration.sql','utf8'));
+const server=createServer(database,{logLevel:LogLevel.Error});await new Promise(r=>server.listen(5544,'127.0.0.1',r));
+const env={...process.env,DATABASE_URL:'postgresql://user:pass@127.0.0.1:5544/creativehub?connection_limit=1',WEB_URL:'http://localhost:3000',PORT:'4400',PAYMENTS_MODE:'sandbox',TEST_API_URL:'http://127.0.0.1:4400/api/v1',TEST_SKIP_DB:'true',TEST_RESULT_PATH:'/tmp/creativehub-test-result.json'};
+const run=(args)=>new Promise((resolve,reject)=>{const p=spawn(process.execPath,args,{env,stdio:'inherit'});p.on('exit',code=>code===0?resolve():reject(new Error(`Command exited ${code}`)));});
+let api;
+try{await run(['--import','tsx','prisma/seed.ts']);await database.exec('DEALLOCATE ALL');api=spawn(process.execPath,['apps/api/dist/main.js'],{env,stdio:['ignore','ignore','inherit']});let ready=false;for(let i=0;i<100;i++){try{const res=await fetch('http://127.0.0.1:4400/api/v1/health');if(res.ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}if(!ready)throw new Error('API did not start');await run(['scripts/integration.mjs']);const result=JSON.parse(readFileSync(env.TEST_RESULT_PATH,'utf8'));const payments=await database.query('SELECT count(*)::int AS count FROM "PaymentTransaction" WHERE "bookingId"=$1',[result.bookingId]);assert.equal(payments.rows[0].count,1);const journal=await database.query('SELECT e.* FROM "LedgerEntry" e JOIN "LedgerTransaction" t ON e."transactionId"=t.id WHERE t."externalKey"=$1',[`sandbox:${result.paymentId}`]);assert.equal(journal.rows.reduce((n,e)=>n+BigInt(e.debitMinor)-BigInt(e.creditMinor),0n),0n);await assert.rejects(database.query('UPDATE "LedgerEntry" SET "debitMinor"=0 WHERE id=$1',[journal.rows[0].id]));console.log('PASS: database payment uniqueness, journal balance and immutability');
+const views=await database.query('SELECT count(*)::int AS count FROM "AnalyticsEvent" WHERE "creatorId"=$1',[result.creatorId]);assert.equal(views.rows[0].count,1);
+await database.query('INSERT INTO "UserRole" (id,"userId",role) VALUES ($1,$2,$$ADMIN$$)',['test-admin-role',result.customerId]);
+const apiCall=async(path,body,cookie='')=>{const res=await fetch(`http://127.0.0.1:4400/api/v1${path}`,{method:'POST',headers:{Origin:env.WEB_URL,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(body)});return {status:res.status,data:await res.json()};};
+const refunded=await apiCall(`/admin/payments/${result.refundPaymentId}/sandbox-refund`,{reason:'Cancelled test appointment full refund'},result.customerCookie);assert.equal(refunded.status,201,JSON.stringify(refunded.data));assert.equal(refunded.data.status,'REFUNDED');
+const replay=await apiCall(`/admin/payments/${result.refundPaymentId}/sandbox-refund`,{reason:'Repeat test refund request'},result.customerCookie);assert.equal(replay.status,201);
+const refunds=await database.query('SELECT count(*)::int AS count FROM "Refund" WHERE "paymentId"=$1',[result.refundPaymentId]);assert.equal(refunds.rows[0].count,1);
+const email=await database.query('SELECT body FROM "EmailJob" WHERE subject=$1',['Reset your CreativeHub password']);const token=/token=([^\s]+)/.exec(email.rows[0].body)[1];
+const reset=await apiCall('/auth/reset-password',{token,password:'new-test-password-12345'});assert.equal(reset.status,201,JSON.stringify(reset.data));const reuse=await apiCall('/auth/reset-password',{token,password:'new-test-password-12345'});assert.equal(reuse.status,400);
+const stale=await fetch('http://127.0.0.1:4400/api/v1/auth/me',{headers:{Cookie:result.customerCookie}});assert.equal(stale.status,401);
+console.log('PASS: daily view deduplication, authorized sandbox refund and replay, password reset token reuse rejection and session invalidation');}finally{api?.kill('SIGTERM');server.close();await database.close();}
