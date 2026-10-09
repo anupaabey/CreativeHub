@@ -7,4 +7,4 @@ if (process.env.VERCEL_ENV === 'production' && process.env.CREATIVEHUB_APPLY_MIG
   run(['node_modules/prisma/build/index.js', 'migrate', 'deploy', '--schema', 'prisma/schema.prisma'], env);
   run(['--import', 'tsx', 'prisma/seed.ts'], env);
 }
-execFileSync(process.execPath, ['../../node_modules/@nestjs/cli/bin/nest.js', 'build'], { stdio: 'inherit' });
+execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
